@@ -1,0 +1,59 @@
+name: Build Nethogs for ARMv7l
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. 检出代码
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. 设置 QEMU，使 x86 机器可以运行 ARM 容器
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    # 3. 在 Docker 容器中进行编译 (核心步骤)
+    - name: Build inside ARMv7 container
+      run: |
+        # 启动一个 armv7l (32位) 的 Debian Buster 容器
+        # 将当前工作目录挂载到容器内的 /work
+        docker run --rm -v ${{ github.workspace }}:/work --platform linux/arm/v7 debian:buster-slim sh -c "
+          set -e
+          
+          echo '=== Updating sources and installing dependencies ==='
+          apt-get update
+          # 安装构建工具和 nethogs 依赖 (libpcap, ncurses)
+          apt-get install -y build-essential libpcap-dev libncurses5-dev
+          
+          echo '=== Starting Build ==='
+          cd /work
+          
+          # 清理旧构建
+          make clean
+          
+          # 静态编译命令
+          # LDFLAGS='-static' 强制静态链接
+          # 显式链接 -ltinfo 是为了兼容某些 ncurses 的静态库实现
+          make nethogs \
+            CXX=g++ \
+            CC=gcc \
+            LDFLAGS='-static -L/usr/lib/arm-linux-gnueabihf' \
+            LIBS='-lpcap -lncurses -ltinfo'
+            
+          echo '=== Build Complete ==='
+          # 验证生成的文件类型 (应该是 ELF 32-bit LSB executable, ARM, statically linked)
+          file nethogs
+        "
+
+    # 4. 上传编译产物
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nethogs-armv7l-static
+        path: nethogs
